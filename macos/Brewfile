@@ -1,2 +1,20 @@
 brew "git"
+brew "duti"
 brew "mise"
+brew "mas"
+brew "dotnet"
+brew "ripgrep"
+
+cask "1password"
+cask "1password-cli"
+cask "ghostty"
+cask "spotify"
+cask "docker"
+cask "google-chrome"
+cask "firefox"
+cask "discord"
+cask "sublime-merge"
+cask "alfred"
+cask "visual-studio-code"
+
+mas "Xcode", id: 497799835

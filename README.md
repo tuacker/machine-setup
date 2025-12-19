@@ -1,11 +1,21 @@
 # Machine setup
 
-Personal machine bootstrap scripts and notes.
+Bootstrap scripts for new machines. Currently only macOS is supported.
 
-## Structure
+## Quick start (macOS)
 
-- macos/: macOS-specific setup steps and scripts
+```bash
+curl -fsSL https://raw.githubusercontent.com/tuacker/machine-setup/main/macos/setup.sh | bash
+```
 
-## Status
+## Local run (macOS)
 
-Early draft. We'll refine into a reproducible bootstrap.
+```bash
+git clone https://github.com/tuacker/machine-setup.git
+cd machine-setup
+./macos/setup.sh
+```
+
+## Docs
+
+- `macos/README.md`
