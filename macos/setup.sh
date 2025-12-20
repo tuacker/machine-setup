@@ -544,7 +544,7 @@ write_file_if_changed() {
 starship_config_content() {
   cat <<'EOF'
 format = """
-$username at $hostname in $directory$git_branch$git_status status: $status
+$username at $hostname in $directory$git_branch$git_status$custom$status
 $character
 """
 
@@ -562,15 +562,27 @@ truncation_symbol = ""
 truncate_to_repo = false
 home_symbol = "~"
 read_only = ""
-format = "[$path]($style) "
+format = "[$path]($style)"
+
+[git_branch]
+format = " on [$symbol$branch]($style)"
+
+[git_status]
+format = " [\\[$all_status$ahead_behind\\]]($style)"
 
 [status]
 disabled = false
-format = '[$symbol \($status\)]($style)'
+format = ' status: [$symbol \($status\)]($style)'
 success_symbol = "ok"
 symbol = "err"
 success_style = "green"
 failure_style = "red"
+
+[custom.codex]
+command = 'basename "$CODEX_HOME"'
+when = '[ -n "$CODEX_HOME" ] && [ "$(basename "$CODEX_HOME")" != ".codex" ]'
+format = ' [$output]($style)'
+style = 'yellow'
 EOF
 }
 
@@ -680,8 +692,9 @@ need_user_shell() {
     'autoload -Uz compinit'
     'compinit'
     'zstyle ":completion:*" matcher-list "m:{a-zA-Z}={A-Za-z}"'
+    'eval "$(direnv hook zsh)"'
     'eval "$(starship init zsh)"'
-    "alias cy='codex --yolo'"
+    "alias cy='codex --yolo --search'"
     'yt(){ yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox "$@"; }'
   )
 
@@ -1012,10 +1025,13 @@ step_user_shell() {
   if ensure_line "$zshrc" 'zstyle ":completion:*" matcher-list "m:{a-zA-Z}={A-Za-z}"'; then
     shell_changed="true"
   fi
+  if ensure_line "$zshrc" 'eval "$(direnv hook zsh)"'; then
+    shell_changed="true"
+  fi
   if ensure_line "$zshrc" 'eval "$(starship init zsh)"'; then
     shell_changed="true"
   fi
-  if ensure_line "$zshrc" "alias cy='codex --yolo'"; then
+  if ensure_line "$zshrc" "alias cy='codex --yolo --search'"; then
     shell_changed="true"
   fi
   if ensure_line "$zshrc" 'yt(){ yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox "$@"; }'; then
@@ -1283,6 +1299,7 @@ Manual steps:
 - Finder -> Settings -> Sidebar: customize favorites to your liking
 - Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
 - IINA -> Settings -> General: enable "Use legacy fullscreen"
+- Work repo: add a `.envrc` with `export CODEX_HOME="$HOME/.codex-<project>"`, then run `direnv allow`
 - Xcode: download from https://developer.apple.com/download/all/ then install with `unxip Xcode_*.xip /Applications`
 EOF
 }
