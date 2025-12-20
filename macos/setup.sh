@@ -73,6 +73,15 @@ log() {
   printf '%s\n' "$*"
 }
 
+prompt_user() {
+  local message="$1"
+  if [[ -t 0 ]]; then
+    read -r -p "$message" _
+  else
+    read -r -p "$message" _ </dev/tty
+  fi
+}
+
 init_log() {
   local timestamp
   timestamp="$(date +"%Y%m%d-%H%M%S")"
@@ -901,7 +910,7 @@ step_xcode_clt() {
   log "Installing Xcode Command Line Tools."
   xcode-select --install || true
   while ! xcode-select -p >/dev/null 2>&1; do
-    read -r -p "Finish the installer, then press Enter to continue..." _
+    prompt_user "Finish the installer, then press Enter to continue..."
   done
   summary_installed "Xcode Command Line Tools"
 }
@@ -949,7 +958,7 @@ step_brew_bundle() {
 
   log "Sign in to the App Store to enable MAS installs (for Office apps)."
   open -a "App Store" >/dev/null 2>&1 || true
-  read -r -p "Press Enter once signed in..." _
+  prompt_user "Press Enter once signed in..."
 
   log "Running brew bundle."
   "$BREW_BIN" bundle --file "$BREWFILE"
@@ -1054,7 +1063,7 @@ step_one_password() {
 
   log "Open 1Password and sign in."
   open -a "1Password" >/dev/null 2>&1 || true
-  read -r -p "Enable CLI integration (Settings -> Developer), then press Enter..." _
+  prompt_user "Enable CLI integration (Settings -> Developer), then press Enter..."
 
   if ! "$op_bin" account list >/dev/null 2>&1; then
     log "Add your 1Password account."
@@ -1069,7 +1078,7 @@ step_one_password() {
   if [[ ! -S "$op_ssh_sock" ]]; then
     log "Enable the 1Password SSH agent (Settings -> Developer) and unlock the app."
     while [[ ! -S "$op_ssh_sock" ]]; do
-      read -r -p "Press Enter once the agent is enabled..." _
+      prompt_user "Press Enter once the agent is enabled..."
     done
   fi
 
