@@ -1279,6 +1279,7 @@ Manual steps:
 - System Settings -> Passwords -> AutoFill Passwords and Passkeys: disable (use 1Password)
 - System Settings -> Notifications: disable notification sounds per-app (no global toggle)
 - System Settings -> Appearance -> Sidebar icon size: Small
+- System Settings -> Control Center: adjust menu bar items (e.g., Focus) to your preference
 - Finder -> Settings -> Sidebar: customize favorites to your liking
 - Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
 - IINA -> Settings -> General: enable "Use legacy fullscreen"
