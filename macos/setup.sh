@@ -673,6 +673,7 @@ need_user_shell() {
     'zstyle ":completion:*" matcher-list "m:{a-zA-Z}={A-Za-z}"'
     'eval "$(starship init zsh)"'
     "alias cy='codex --yolo'"
+    'yt(){ yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox "$@"; }'
   )
 
   for line in "${zshrc_lines[@]}"; do
@@ -1008,6 +1009,9 @@ step_user_shell() {
   if ensure_line "$zshrc" "alias cy='codex --yolo'"; then
     shell_changed="true"
   fi
+  if ensure_line "$zshrc" 'yt(){ yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox "$@"; }'; then
+    shell_changed="true"
+  fi
 
   if starship_config_content | write_file_if_changed "$HOME/.config/starship.toml"; then
     starship_changed="true"
@@ -1262,14 +1266,14 @@ manual_steps() {
   cat <<'EOF'
 
 Manual steps:
-- Xcode: download from https://developer.apple.com/download/all/ then install with:
-  unxip Xcode_*.xip /Applications
 - System Settings -> Apple ID -> iCloud -> iCloud Drive: disable "Optimize Mac Storage"
 - System Settings -> Passwords -> AutoFill Passwords and Passkeys: disable (use 1Password)
 - System Settings -> Notifications: disable notification sounds per-app (no global toggle)
 - System Settings -> Appearance -> Sidebar icon size: Small
 - Finder -> Settings -> Sidebar: customize favorites to your liking
 - Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
+- IINA -> Settings -> General: enable "Use legacy fullscreen"
+- Xcode: download from https://developer.apple.com/download/all/ then install with `unxip Xcode_*.xip /Applications`
 EOF
 }
 
@@ -1299,6 +1303,15 @@ print_brewfile_summary() {
   fi
 }
 
+print_shell_shortcuts() {
+  cat <<'EOF'
+
+Shell shortcuts:
+- cy = codex --yolo
+- yt = yt-dlp -f "bv*+ba/b" --write-subs --write-auto-subs --sub-langs "en.*,de.*" --sub-format "srt/best" --convert-subs srt <url>
+EOF
+}
+
 build_sets
 init_log
 
@@ -1320,4 +1333,5 @@ fi
 
 print_summary
 print_brewfile_summary
+print_shell_shortcuts
 manual_steps
