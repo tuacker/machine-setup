@@ -6,7 +6,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]-$0}")" && pwd)"
 BREWFILE_URL="https://raw.githubusercontent.com/tuacker/machine-setup/main/macos/Brewfile"
 BREWFILE_PATH="$SCRIPT_DIR/Brewfile"
 BREWFILE=""

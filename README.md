@@ -8,6 +8,12 @@ Bootstrap scripts for new machines. Currently only macOS is supported.
 curl -fsSL https://raw.githubusercontent.com/tuacker/machine-setup/main/macos/setup.sh | bash
 ```
 
+Dry run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tuacker/machine-setup/main/macos/setup.sh | bash -s -- --dry-run
+```
+
 ## Local run (macOS)
 
 ```bash
