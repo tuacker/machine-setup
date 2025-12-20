@@ -4,6 +4,9 @@ brew "mise"
 brew "mas"
 brew "dotnet"
 brew "ripgrep"
+brew "starship"
+brew "yt-dlp"
+brew "unxip"
 
 cask "1password"
 cask "1password-cli"
@@ -16,5 +19,9 @@ cask "discord"
 cask "sublime-merge"
 cask "alfred"
 cask "visual-studio-code"
+cask "microsoft-teams"
 
-mas "Xcode", id: 497799835
+mas "Microsoft Word", id: 462054704
+mas "Microsoft Excel", id: 462058435
+mas "Microsoft PowerPoint", id: 462062816
+mas "Microsoft Outlook", id: 985367838

@@ -128,10 +128,6 @@ need_global() {
     return 0
   fi
 
-  if [[ ! -d /Applications/Xcode.app ]]; then
-    return 0
-  fi
-
   if ! brew_bin="$(find_brew)"; then
     return 0
   fi
@@ -155,11 +151,11 @@ ensure_line() {
   touch "$file"
 
   if command -v rg >/dev/null 2>&1; then
-    if ! rg -qF -- "$line" "$file"; then
+    if ! rg -qFx -- "$line" "$file"; then
       printf '%s\n' "$line" >> "$file"
     fi
   else
-    if ! grep -Fq -- "$line" "$file"; then
+    if ! grep -Fqx -- "$line" "$file"; then
       printf '%s\n' "$line" >> "$file"
     fi
   fi
@@ -219,10 +215,9 @@ global_setup() {
     exit 1
   fi
 
-  until "$mas_bin" account >/dev/null 2>&1; do
-    log "Sign in to the App Store to enable MAS installs (for Xcode)."
-    read -r -p "Press Enter once signed in..." _
-  done
+  log "Sign in to the App Store to enable MAS installs (for Office apps)."
+  open -a "App Store" >/dev/null 2>&1 || true
+  read -r -p "Press Enter once signed in..." _
 
   log "Running brew bundle."
   "$brew_bin" bundle --file "$BREWFILE"
@@ -251,8 +246,82 @@ user_setup() {
   ensure_line "$zprofile" 'export PNPM_HOME="$HOME/Library/pnpm"'
   ensure_line "$zprofile" 'export PATH="$PNPM_HOME:$PATH"'
 
+  ensure_line "$zprofile" 'export PATH="$HOME/.cargo/bin:$PATH"'
+
   ensure_line "$zshrc" 'eval "$(mise activate zsh)"'
+  ensure_line "$zshrc" 'autoload -Uz compinit'
+  ensure_line "$zshrc" 'compinit'
+  ensure_line "$zshrc" 'zstyle ":completion:*" matcher-list "m:{a-zA-Z}={A-Za-z}"'
+  ensure_line "$zshrc" 'eval "$(starship init zsh)"'
   ensure_line "$zshrc" "alias cy='codex --yolo'"
+
+  local starship_config="$HOME/.config/starship.toml"
+  mkdir -p "$(dirname "$starship_config")"
+  cat <<'EOF' > "$starship_config"
+format = """
+$username at $hostname in $directory$git_branch$git_status status: $status
+$character
+"""
+
+[username]
+show_always = true
+format = "[$user]($style)"
+
+[hostname]
+ssh_only = false
+format = "[$hostname]($style)"
+
+[directory]
+truncation_length = 4
+truncation_symbol = ""
+truncate_to_repo = false
+home_symbol = "~"
+read_only = ""
+format = "[$path]($style) "
+
+[status]
+disabled = false
+format = '[$symbol \($status\)]($style)'
+success_symbol = "ok"
+symbol = "err"
+success_style = "green"
+failure_style = "red"
+EOF
+
+  local op_bin=""
+  if command -v op >/dev/null 2>&1; then
+    op_bin="$(command -v op)"
+  elif [[ -x /opt/homebrew/bin/op ]]; then
+    op_bin="/opt/homebrew/bin/op"
+  elif [[ -x /usr/local/bin/op ]]; then
+    op_bin="/usr/local/bin/op"
+  fi
+
+  if [[ -n "$op_bin" ]]; then
+    log "Open 1Password and sign in."
+    open -a "1Password" >/dev/null 2>&1 || true
+    read -r -p "Enable CLI integration (Settings -> Developer), then press Enter..." _
+
+    if ! "$op_bin" account list >/dev/null 2>&1; then
+      log "Add your 1Password account."
+      "$op_bin" account add
+    fi
+
+    if ! "$op_bin" whoami >/dev/null 2>&1; then
+      log "Sign in to 1Password."
+      eval "$("$op_bin" signin)"
+    fi
+
+    local op_ssh_sock="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+    if [[ ! -S "$op_ssh_sock" ]]; then
+      log "Enable the 1Password SSH agent (Settings -> Developer) and unlock the app."
+      while [[ ! -S "$op_ssh_sock" ]]; do
+        read -r -p "Press Enter once the agent is enabled..." _
+      done
+    fi
+  else
+    log "1Password CLI not found. Install it via the Brewfile."
+  fi
 
   if command -v git >/dev/null 2>&1; then
     git config --global user.name "Markus Bodner"
@@ -290,35 +359,11 @@ user_setup() {
     log "mise not found. Run global setup first."
   fi
 
-  local op_bin=""
-  if command -v op >/dev/null 2>&1; then
-    op_bin="$(command -v op)"
-  elif [[ -x /opt/homebrew/bin/op ]]; then
-    op_bin="/opt/homebrew/bin/op"
-  elif [[ -x /usr/local/bin/op ]]; then
-    op_bin="/usr/local/bin/op"
-  fi
-
-  if [[ -n "$op_bin" ]]; then
-    if ! "$op_bin" account list >/dev/null 2>&1; then
-      log "Add your 1Password account."
-      "$op_bin" account add
-    fi
-
-    if ! "$op_bin" whoami >/dev/null 2>&1; then
-      log "Sign in to 1Password."
-      eval "$("$op_bin" signin)"
-    fi
-
-    local op_ssh_sock="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
-    if [[ ! -S "$op_ssh_sock" ]]; then
-      log "Enable the 1Password SSH agent (Settings -> Developer) and unlock the app."
-      while [[ ! -S "$op_ssh_sock" ]]; do
-        read -r -p "Press Enter once the agent is enabled..." _
-      done
-    fi
+  if command -v rustup >/dev/null 2>&1; then
+    log "rustup already installed."
   else
-    log "1Password CLI not found. Install it via the Brewfile."
+    log "Installing rustup (Rust toolchain manager)."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   fi
 }
 
@@ -336,7 +381,13 @@ defaults_setup() {
   defaults write -g KeyRepeat -int 2
   defaults write -g InitialKeyRepeat -int 15
 
-  defaults write com.apple.Safari AutoFillPasswords -bool false
+  defaults write com.apple.WindowManager EnableStandardClickToShowDesktop -bool false
+
+  if ! defaults write com.apple.Safari AutoFillPasswords -bool false; then
+    log "Unable to write Safari preferences."
+    log "Grant Full Disk Access to your terminal and re-run, or set it manually."
+    exit 1
+  fi
 
   if command -v duti >/dev/null 2>&1; then
     local ghostty_id
@@ -370,6 +421,8 @@ manual_steps() {
   cat <<'EOF'
 
 Manual steps:
+- Xcode: download from https://developer.apple.com/download/all/ then install with:
+  unxip Xcode_*.xip /Applications
 - System Settings -> Passwords -> AutoFill Passwords and Passkeys: disable (use 1Password)
 - System Settings -> Notifications: disable notification sounds per-app (no global toggle)
 - Appearance: set Sidebar icon size to Small (System Settings -> Appearance)
