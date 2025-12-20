@@ -18,4 +18,4 @@ cd machine-setup
 
 ## Docs
 
-- `macos/README.md`
+- [macos](./macos/)
