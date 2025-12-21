@@ -1297,6 +1297,7 @@ Manual steps:
 - System Settings -> Appearance -> Sidebar icon size: Small
 - System Settings -> Control Center: adjust menu bar items (e.g., Focus) to your preference
 - Finder -> Settings -> Sidebar: customize favorites to your liking
+- Finder -> View: Show Path Bar
 - Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
 - IINA -> Settings -> General: enable "Use legacy fullscreen"
 - Work repo: add a `.envrc` with `export CODEX_HOME="$HOME/.codex-<project>"`, then run `direnv allow`
