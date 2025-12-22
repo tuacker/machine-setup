@@ -13,6 +13,7 @@ BREWFILE=""
 BREWFILE_TMP=""
 BREW_BIN=""
 BREW_PREFIX=""
+DOTNET_RELEASE_INDEX_URL="https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json"
 
 TARGET_MACHINE_NAME="bodipro"
 LOG_DIR="$HOME/Library/Logs/machine-setup"
@@ -52,7 +53,7 @@ Legacy shorthands:
 
 Sections (use with --only/--skip):
   Groups:
-    global     = machine, xcode, brew, apps
+    global     = machine, xcode, brew, apps, dotnet
     user       = user-shell, 1password, git, mise, rustup
     defaults   = macOS defaults (Dock/Finder/Safari/etc.)
 
@@ -61,6 +62,7 @@ Sections (use with --only/--skip):
     xcode      = Xcode Command Line Tools
     brew       = install Homebrew
     apps       = Brewfile bundle (formulae/casks/mas)
+    dotnet     = .NET SDK (official Microsoft pkg)
     user-shell = ~/.zprofile, ~/.zshrc, starship config
     1password  = sign in 1Password CLI + SSH agent
     git        = git name/email/default branch + global ignore
@@ -227,7 +229,7 @@ skip_add() {
 expand_token() {
   case "$1" in
     global)
-      echo "machine_name xcode_clt brew_install brew_bundle"
+      echo "machine_name xcode_clt brew_install brew_bundle dotnet_pkg"
       ;;
     user)
       echo "user_shell one_password git_config mise_setup rustup_setup"
@@ -256,6 +258,9 @@ expand_token() {
     rust|rustup)
       echo "rustup_setup"
       ;;
+    dotnet)
+      echo "dotnet_pkg"
+      ;;
     machine)
       echo "machine_name"
       ;;
@@ -273,6 +278,7 @@ ALL_STEPS=(
   xcode_clt
   brew_install
   brew_bundle
+  dotnet_pkg
   user_shell
   one_password
   git_config
@@ -375,6 +381,9 @@ label_for_step() {
       ;;
     rustup_setup)
       echo "Rustup"
+      ;;
+    dotnet_pkg)
+      echo ".NET SDK"
       ;;
     defaults)
       echo "macOS defaults"
@@ -817,6 +826,14 @@ need_mise_setup() {
   return 1
 }
 
+need_dotnet_pkg() {
+  if ! command -v dotnet >/dev/null 2>&1; then
+    NEED_REASON=".NET SDK not installed"
+    return 0
+  fi
+  return 1
+}
+
 need_rustup_setup() {
   if ! command -v rustup >/dev/null 2>&1; then
     NEED_REASON="rustup not installed"
@@ -860,6 +877,9 @@ need_defaults() {
 
   value="$(defaults_read com.apple.dock largesize)"
   [[ "$value" == "70" ]] || mismatches+=("dock.largesize")
+
+  value="$(normalize_bool "$(defaults_read com.apple.dock mru-spaces)")"
+  [[ "$value" == "0" ]] || mismatches+=("dock.mru-spaces")
 
   value="$(defaults_read com.apple.finder FXPreferredViewStyle)"
   [[ "$value" == "Nlsv" ]] || mismatches+=("finder.view-style")
@@ -976,6 +996,115 @@ step_brew_bundle() {
   log "Running brew bundle."
   "$BREW_BIN" bundle --file "$BREWFILE"
   summary_installed "Brewfile dependencies"
+}
+
+step_dotnet_pkg() {
+  local arch
+  local rid
+  local index_tmp
+  local releases_tmp
+  local releases_json_url
+  local pkg_info
+  local pkg_url
+  local sdk_version
+  local pkg_tmp
+
+  if command -v dotnet >/dev/null 2>&1; then
+    log ".NET SDK already installed."
+    summary_skipped ".NET SDK already installed"
+    return 0
+  fi
+
+  if ! command -v ruby >/dev/null 2>&1; then
+    log "Ruby is required to parse .NET release metadata."
+    summary_failed ".NET SDK install failed (ruby missing)"
+    return 1
+  fi
+
+  arch="$(uname -m)"
+  if [[ "$arch" == "arm64" ]]; then
+    rid="osx-arm64"
+  else
+    rid="osx-x64"
+  fi
+
+  index_tmp="$(mktemp -t dotnet-release-index)"
+  releases_tmp="$(mktemp -t dotnet-releases)"
+
+  if ! curl -fsSL "$DOTNET_RELEASE_INDEX_URL" -o "$index_tmp"; then
+    log "Failed to download .NET release index."
+    summary_failed ".NET SDK install failed (release index)"
+    rm -f "$index_tmp" "$releases_tmp"
+    return 1
+  fi
+
+  releases_json_url="$(ruby -rjson -e '
+data = JSON.parse(File.read(ARGV[0]))
+channels = data["releases-index"].select { |r| r["release-type"] == "lts" }
+channels = data["releases-index"] if channels.empty?
+latest = channels.max_by { |r| r["channel-version"].to_f }
+puts latest["releases.json"]
+' "$index_tmp")"
+
+  if [[ -z "$releases_json_url" ]]; then
+    log "Failed to resolve .NET releases metadata URL."
+    summary_failed ".NET SDK install failed (release metadata)"
+    rm -f "$index_tmp" "$releases_tmp"
+    return 1
+  fi
+
+  if ! curl -fsSL "$releases_json_url" -o "$releases_tmp"; then
+    log "Failed to download .NET releases metadata."
+    summary_failed ".NET SDK install failed (release metadata)"
+    rm -f "$index_tmp" "$releases_tmp"
+    return 1
+  fi
+
+  pkg_info="$(DOTNET_RID="$rid" ruby -rjson -e '
+data = JSON.parse(File.read(ARGV[0]))
+releases = data["releases"]
+latest = releases.max_by { |r| r["release-date"] }
+sdk = latest["sdk"] || {}
+files = sdk["files"] || []
+file = files.find { |f| f["rid"] == ENV["DOTNET_RID"] && f["url"] && f["url"].end_with?(".pkg") }
+if file && file["url"]
+  puts file["url"]
+  puts sdk["version"]
+end
+' "$releases_tmp")"
+
+  pkg_url="$(printf '%s\n' "$pkg_info" | sed -n '1p')"
+  sdk_version="$(printf '%s\n' "$pkg_info" | sed -n '2p')"
+
+  if [[ -z "$pkg_url" ]]; then
+    log "Failed to resolve .NET SDK package URL."
+    summary_failed ".NET SDK install failed (package URL)"
+    rm -f "$index_tmp" "$releases_tmp"
+    return 1
+  fi
+
+  pkg_tmp="$(mktemp -t dotnet-sdk).pkg"
+  log "Downloading .NET SDK ${sdk_version:-latest} (${rid})."
+  if ! curl -fL "$pkg_url" -o "$pkg_tmp"; then
+    log "Failed to download .NET SDK package."
+    summary_failed ".NET SDK install failed (download)"
+    rm -f "$index_tmp" "$releases_tmp" "$pkg_tmp"
+    return 1
+  fi
+
+  log "Installing .NET SDK (requires sudo)."
+  if ! sudo installer -pkg "$pkg_tmp" -target /; then
+    summary_failed ".NET SDK install failed (installer)"
+    rm -f "$index_tmp" "$releases_tmp" "$pkg_tmp"
+    return 1
+  fi
+
+  rm -f "$index_tmp" "$releases_tmp" "$pkg_tmp"
+  if [[ -n "$sdk_version" ]]; then
+    summary_installed ".NET SDK $sdk_version"
+  else
+    summary_installed ".NET SDK"
+  fi
 }
 
 step_user_shell() {
@@ -1190,6 +1319,7 @@ step_defaults() {
   defaults write com.apple.dock autohide -bool true
   defaults write com.apple.dock magnification -bool true
   defaults write com.apple.dock largesize -int 70
+  defaults write com.apple.dock mru-spaces -bool false
 
   defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
   defaults write com.apple.finder NewWindowTarget -string "PfHm"
@@ -1347,6 +1477,7 @@ run_or_exit machine_name step_machine_name need_machine_name
 run_or_exit xcode_clt step_xcode_clt need_xcode_clt
 run_or_exit brew_install step_brew_install need_brew_install
 run_or_exit brew_bundle step_brew_bundle need_brew_bundle
+run_or_exit dotnet_pkg step_dotnet_pkg need_dotnet_pkg
 run_or_exit user_shell step_user_shell need_user_shell
 run_or_exit one_password step_one_password need_one_password
 run_or_exit git_config step_git_config need_git_config

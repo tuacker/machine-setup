@@ -17,12 +17,12 @@ Bootstrap script for a fresh macOS install. Installs core tools/apps, configures
 ### Sections
 
 Groups:
-- `global` = `machine`, `xcode`, `brew`, `apps`
+- `global` = `machine`, `xcode`, `brew`, `apps`, `dotnet`
 - `user` = `user-shell`, `1password`, `git`, `mise`, `rustup`
 - `defaults` = macOS defaults
 
 Steps:
-- `machine`, `xcode`, `brew`, `apps`, `user-shell`, `1password`, `git`, `mise`, `rustup`
+- `machine`, `xcode`, `brew`, `apps`, `dotnet`, `user-shell`, `1password`, `git`, `mise`, `rustup`
 
 `--only` forces the selected sections to run. Dependencies may run automatically.
 
