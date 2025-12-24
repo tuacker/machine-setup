@@ -890,6 +890,9 @@ need_defaults() {
   value="$(normalize_bool "$(defaults_read -g AppleShowAllExtensions)")"
   [[ "$value" == "1" ]] || mismatches+=("show-all-extensions")
 
+  value="$(normalize_bool "$(defaults_read com.apple.finder AppleShowAllFiles)")"
+  [[ "$value" == "1" ]] || mismatches+=("show-all-files")
+
   value="$(normalize_bool "$(defaults_read -g ApplePressAndHoldEnabled)")"
   [[ "$value" == "0" ]] || mismatches+=("press-and-hold")
 
@@ -1323,6 +1326,7 @@ step_defaults() {
 
   defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
   defaults write com.apple.finder NewWindowTarget -string "PfHm"
+  defaults write com.apple.finder AppleShowAllFiles -bool true
 
   defaults write -g AppleShowAllExtensions -bool true
   defaults write -g ApplePressAndHoldEnabled -bool false
