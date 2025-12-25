@@ -1436,6 +1436,7 @@ Manual steps:
 - System Settings -> Control Center: adjust menu bar items (e.g., Focus) to your preference
 - Finder -> Settings -> Sidebar: customize favorites to your liking
 - Finder -> View: Show Path Bar
+- Finder -> Settings -> Advanced: enable "Keep folders on top" (when sorting by name)
 - Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
 - IINA -> Settings -> General: enable "Use legacy fullscreen"
 - Work repo: to use a different Codex login in a subdirectory:
