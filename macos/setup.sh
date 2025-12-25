@@ -12,7 +12,6 @@ BREWFILE_PATH="$SCRIPT_DIR/Brewfile"
 BREWFILE=""
 BREWFILE_TMP=""
 BREW_BIN=""
-BREW_PREFIX=""
 DOTNET_RELEASE_INDEX_URL="https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json"
 
 TARGET_MACHINE_NAME="bodipro"
@@ -75,6 +74,162 @@ log() {
   printf '%s\n' "$*"
 }
 
+USE_COLOR="false"
+if [[ -t 0 && -z "${NO_COLOR:-}" ]]; then
+  USE_COLOR="true"
+fi
+
+LOG_FD=3
+TTY_OUT=""
+
+if [[ "$USE_COLOR" == "true" ]]; then
+  C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_DIM=$'\033[2m'
+  C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_BLUE=$'\033[34m'
+else
+  C_RESET=""
+  C_BOLD=""
+  C_DIM=""
+  C_RED=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_BLUE=""
+fi
+
+log_info() {
+  printf '%b\n' "${C_BLUE}INFO${C_RESET} $*"
+}
+
+log_warn() {
+  printf '%b\n' "${C_YELLOW}WARN${C_RESET} $*"
+}
+
+log_err() {
+  printf '%b\n' "${C_RED}ERROR${C_RESET} $*"
+}
+
+section() {
+  local title="$1"
+  printf '\n%b\n' "${C_BOLD}${title}${C_RESET}"
+}
+
+log_file() {
+  printf '%s\n' "$*" >&"$LOG_FD"
+}
+
+status_ok() {
+  if [[ "$USE_COLOR" == "true" ]]; then
+    printf '  %b %s\n' "${C_GREEN}✓${C_RESET}" "$1"
+  else
+    printf '  ✓ %s\n' "$1"
+  fi
+}
+
+status_fail() {
+  if [[ "$USE_COLOR" == "true" ]]; then
+    printf '  %b %s\n' "${C_RED}✗${C_RESET}" "$1"
+  else
+    printf '  ✗ %s\n' "$1"
+  fi
+}
+
+run_quiet() {
+  "$@" >>"$LOG_FILE" 2>&1
+}
+
+run_with_spinner() {
+  local message="$1"
+  shift
+
+  if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
+    start_spinner "$message"
+    if run_quiet "$@"; then
+      stop_spinner success
+      return 0
+    fi
+    stop_spinner fail
+    return 1
+  fi
+
+  log "$message"
+  "$@"
+}
+
+SPINNER_PID=""
+SPINNER_MSG=""
+SPINNER_PREFIX="  "
+SPINNER_DONE=""
+SPINNER_FAIL=""
+SPINNER_ENABLED="false"
+
+start_spinner() {
+  local message="$1"
+  SPINNER_MSG="$message"
+
+  if [[ -z "$TTY_OUT" ]]; then
+    log "  $message"
+    return 0
+  fi
+
+  if [[ "$SPINNER_ENABLED" != "true" ]]; then
+    log "  $message"
+    return 0
+  fi
+
+  log_file "$message"
+
+  local frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  local delay="0.1"
+
+  if [[ "$USE_COLOR" == "true" ]]; then
+    SPINNER_DONE="${C_GREEN}✓${C_RESET}"
+    SPINNER_FAIL="${C_RED}✗${C_RESET}"
+  else
+    SPINNER_DONE="✓"
+    SPINNER_FAIL="✗"
+  fi
+
+  printf '%s ' "${SPINNER_PREFIX}${frames[0]} $message" >"$TTY_OUT"
+  (
+    local i=0
+    while true; do
+      local frame="${frames[i]}"
+      if [[ "$USE_COLOR" == "true" ]]; then
+        frame="${C_DIM}${frame}${C_RESET}"
+      fi
+      printf '\r%s%s %s' "$SPINNER_PREFIX" "$frame" "$message" >"$TTY_OUT"
+      i=$(( (i + 1) % ${#frames[@]} ))
+      sleep "$delay"
+    done
+  ) &
+  SPINNER_PID=$!
+}
+
+stop_spinner() {
+  local status="${1:-success}"
+  local mark="$SPINNER_DONE"
+
+  if [[ "$status" != "success" ]]; then
+    mark="$SPINNER_FAIL"
+  fi
+
+  if [[ -n "$SPINNER_PID" ]]; then
+    kill "$SPINNER_PID" >/dev/null 2>&1 || true
+    wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=""
+    if [[ -n "$TTY_OUT" ]]; then
+      printf '\r\033[K%s%s %s\n' "$SPINNER_PREFIX" "$mark" "$SPINNER_MSG" >"$TTY_OUT"
+    else
+      printf '\r%s done\n' "$SPINNER_MSG"
+    fi
+    SPINNER_MSG=""
+  fi
+}
+
 prompt_user() {
   local message="$1"
   if [[ -t 0 ]]; then
@@ -84,16 +239,77 @@ prompt_user() {
   fi
 }
 
+wait_for_enter() {
+  local message="$1"
+  shift
+  local mark=""
+  local clear_line=""
+
+  if [[ "$USE_COLOR" == "true" ]]; then
+    mark="${C_GREEN}✓${C_RESET}"
+  else
+    mark="✓"
+  fi
+
+  if command -v tput >/dev/null 2>&1; then
+    clear_line="$(printf '%s%s' "$(tput cuu1 2>/dev/null || true)" "$(tput el 2>/dev/null || true)")"
+  else
+    clear_line=$'\033[1A\r\033[K'
+  fi
+
+  if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
+    start_spinner "$message"
+    if [[ $# -gt 0 ]]; then
+      "$@" >/dev/null 2>&1 || true
+    fi
+    read -r _ </dev/tty
+    if [[ -n "$SPINNER_PID" ]]; then
+      kill "$SPINNER_PID" >/dev/null 2>&1 || true
+      wait "$SPINNER_PID" 2>/dev/null || true
+      SPINNER_PID=""
+      SPINNER_MSG=""
+    fi
+    printf '%s%s%s %s\n' "$clear_line" "$SPINNER_PREFIX" "$mark" "$message" >"$TTY_OUT"
+  else
+    if [[ $# -gt 0 ]]; then
+      "$@" >/dev/null 2>&1 || true
+    fi
+    prompt_user "$message"
+  fi
+}
+
 init_log() {
   local timestamp
+  local show_spinner="false"
   timestamp="$(date +"%Y%m%d-%H%M%S")"
   LOG_FILE="$LOG_DIR/${timestamp}-machine-setup.log"
   mkdir -p "$LOG_DIR"
   touch "$LOG_FILE"
-  exec > >(tee -a "$LOG_FILE") 2>&1
-  log "Log file: $LOG_FILE"
-  if [[ "$DRY_RUN" == "true" ]]; then
-    log "Dry run: evaluating checks..."
+  exec 3>>"$LOG_FILE"
+  if [[ -t 0 && -w /dev/tty ]]; then
+    TTY_OUT="/dev/tty"
+    show_spinner="true"
+  fi
+  SPINNER_ENABLED="$show_spinner"
+  if [[ -n "$TTY_OUT" ]]; then
+    printf '\n%b\n' "${C_BOLD}Machine Setup${C_RESET}" >"$TTY_OUT"
+    printf 'Log file: %s\n' "$LOG_FILE" >"$TTY_OUT"
+    printf '\n' >"$TTY_OUT"
+    log_file "Machine Setup"
+    log_file "Log file: $LOG_FILE"
+    if [[ "$DRY_RUN" == "true" ]]; then
+      printf '%b\n' "${C_BLUE}INFO${C_RESET} Dry run - evaluating..." >"$TTY_OUT"
+      log_file "INFO Dry run - evaluating..."
+    fi
+    exec > >(tee -a "$LOG_FILE") 2>&1
+  else
+    exec > >(tee -a "$LOG_FILE") 2>&1
+    section "Machine Setup"
+    log "Log file: $LOG_FILE"
+    if [[ "$DRY_RUN" == "true" ]]; then
+      log ""
+      log_info "Dry run - evaluating..."
+    fi
   fi
 }
 
@@ -202,7 +418,18 @@ cleanup() {
   fi
 }
 
+handle_interrupt() {
+  stop_spinner fail || true
+  if [[ -n "$TTY_OUT" ]]; then
+    printf '\n' >"$TTY_OUT"
+  else
+    printf '\n'
+  fi
+  exit 130
+}
+
 trap cleanup EXIT
+trap handle_interrupt INT TERM
 
 set_has() {
   local set="$1"
@@ -423,9 +650,9 @@ print_summary_section() {
   if [[ $# -eq 0 ]]; then
     return 0
   fi
-  printf '\n%s:\n' "$title"
+  section "$title"
   for item in "$@"; do
-    printf -- '- %s\n' "$item"
+    printf -- '  - %s\n' "$item"
   done
 }
 
@@ -445,13 +672,13 @@ print_summary() {
 }
 
 print_plan() {
-  printf '\nPlan (dry run):\n'
+  section "Plan (dry run)"
   if [[ ${#SUMMARY_PLANNED[@]} -eq 0 ]]; then
     printf '%s\n' "No changes needed."
     return 0
   fi
   for item in "${SUMMARY_PLANNED[@]}"; do
-    printf -- '- %s\n' "$item"
+    printf -- '  - %s\n' "$item"
   done
 }
 
@@ -476,10 +703,8 @@ ensure_brew_env() {
   if brew_bin="$(find_brew)"; then
     BREW_BIN="$brew_bin"
     eval "$("$BREW_BIN" shellenv)"
-    BREW_PREFIX="$("$BREW_BIN" --prefix)"
   else
     BREW_BIN=""
-    BREW_PREFIX=""
   fi
 }
 
@@ -675,9 +900,9 @@ need_user_shell() {
 
   if brew_bin="$(find_brew)"; then
     if [[ "$brew_bin" == "/opt/homebrew/bin/brew" ]]; then
-      brew_shellenv_line='eval "$(/opt/homebrew/bin/brew shellenv)"'
+      brew_shellenv_line="eval \"\$(/opt/homebrew/bin/brew shellenv)\""
     elif [[ "$brew_bin" == "/usr/local/bin/brew" ]]; then
-      brew_shellenv_line='eval "$(/usr/local/bin/brew shellenv)"'
+      brew_shellenv_line="eval \"\$(/usr/local/bin/brew shellenv)\""
     fi
   fi
 
@@ -686,10 +911,10 @@ need_user_shell() {
   fi
 
   zprofile_lines=(
-    'export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"'
-    'export PNPM_HOME="$HOME/Library/pnpm"'
-    'export PATH="$PNPM_HOME:$PATH"'
-    'export PATH="$HOME/.cargo/bin:$PATH"'
+    "export SSH_AUTH_SOCK=\"\$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock\""
+    "export PNPM_HOME=\"\$HOME/Library/pnpm\""
+    "export PATH=\"\$PNPM_HOME:\$PATH\""
+    "export PATH=\"\$HOME/.cargo/bin:\$PATH\""
   )
 
   for line in "${zprofile_lines[@]}"; do
@@ -700,14 +925,14 @@ need_user_shell() {
   done
 
   zshrc_lines=(
-    'eval "$(mise activate zsh)"'
+    "eval \"\$(mise activate zsh)\""
     'autoload -Uz compinit'
     'compinit'
     'zstyle ":completion:*" matcher-list "m:{a-zA-Z}={A-Za-z}"'
-    'eval "$(direnv hook zsh)"'
-    'eval "$(starship init zsh)"'
+    "eval \"\$(direnv hook zsh)\""
+    "eval \"\$(starship init zsh)\""
     "alias cy='codex --yolo --search'"
-    'yt(){ yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox "$@"; }'
+    "yt(){ yt-dlp -f \"bv*+ba/b\" --write-subs --sub-langs \"en\" --sub-format \"srt/best\" --convert-subs srt --cookies-from-browser firefox \"\$@\"; }"
   )
 
   for line in "${zshrc_lines[@]}"; do
@@ -760,7 +985,7 @@ need_one_password() {
 }
 
 need_git_config() {
-  local missing=0
+  local missing_flag=0
   local gitignore_global="$HOME/.gitignore_global"
   local line
   local gitignore_lines=(
@@ -777,27 +1002,27 @@ need_git_config() {
   fi
 
   if [[ "$(git config --global user.name || true)" != "Markus Bodner" ]]; then
-    missing=1
+    missing_flag=1
   fi
   if [[ "$(git config --global user.email || true)" != "me@markusbodner.com" ]]; then
-    missing=1
+    missing_flag=1
   fi
   if [[ "$(git config --global init.defaultBranch || true)" != "main" ]]; then
-    missing=1
+    missing_flag=1
   fi
 
   for line in "${gitignore_lines[@]}"; do
     if line_missing "$gitignore_global" "$line"; then
-      missing=1
+      missing_flag=1
       break
     fi
   done
 
   if [[ "$(git config --global core.excludesfile || true)" != "$gitignore_global" ]]; then
-    missing=1
+    missing_flag=1
   fi
 
-  if [[ "$missing" -eq 1 ]]; then
+  if [[ "$missing_flag" -eq 1 ]]; then
     NEED_REASON="git config or global ignore missing"
     return 0
   fi
@@ -893,9 +1118,6 @@ need_defaults() {
   value="$(normalize_bool "$(defaults_read -g AppleShowAllExtensions)")"
   [[ "$value" == "1" ]] || mismatches+=("show-all-extensions")
 
-  value="$(normalize_bool "$(defaults_read com.apple.finder AppleShowAllFiles)")"
-  [[ "$value" == "1" ]] || mismatches+=("show-all-files")
-
   if [[ -d "$HOME/Library" ]]; then
     value="$(stat -f %Sf "$HOME/Library" 2>/dev/null || true)"
     if [[ "$value" == *hidden* ]]; then
@@ -968,7 +1190,6 @@ step_brew_install() {
     log "Homebrew already installed."
     summary_skipped "Homebrew already installed"
     BREW_BIN="$brew_bin"
-    BREW_PREFIX="$("$BREW_BIN" --prefix)"
     eval "$("$BREW_BIN" shellenv)"
     return 0
   fi
@@ -1002,12 +1223,16 @@ step_brew_bundle() {
     return 1
   fi
 
-  log "Sign in to the App Store to enable MAS installs (for Office apps)."
-  open -a "App Store" >/dev/null 2>&1 || true
-  prompt_user "Press Enter once signed in..."
+  log ""
+  wait_for_enter "Sign in to the App Store to enable MAS installs (for Office apps), then press Enter..." \
+    open -a "App Store"
+  log ""
 
-  log "Running brew bundle."
-  "$BREW_BIN" bundle --file "$BREWFILE"
+  if ! run_with_spinner "Running brew bundle..." "$BREW_BIN" bundle --file "$BREWFILE"; then
+    log "Brew bundle failed. See log file for details."
+    summary_failed "Brewfile bundle failed"
+    return 1
+  fi
   summary_installed "Brewfile dependencies"
 }
 
@@ -1044,7 +1269,7 @@ step_dotnet_pkg() {
   index_tmp="$(mktemp -t dotnet-release-index)"
   releases_tmp="$(mktemp -t dotnet-releases)"
 
-  if ! curl -fsSL "$DOTNET_RELEASE_INDEX_URL" -o "$index_tmp"; then
+  if ! run_quiet curl -fsSL "$DOTNET_RELEASE_INDEX_URL" -o "$index_tmp"; then
     log "Failed to download .NET release index."
     summary_failed ".NET SDK install failed (release index)"
     rm -f "$index_tmp" "$releases_tmp"
@@ -1066,7 +1291,7 @@ puts latest["releases.json"]
     return 1
   fi
 
-  if ! curl -fsSL "$releases_json_url" -o "$releases_tmp"; then
+  if ! run_quiet curl -fsSL "$releases_json_url" -o "$releases_tmp"; then
     log "Failed to download .NET releases metadata."
     summary_failed ".NET SDK install failed (release metadata)"
     rm -f "$index_tmp" "$releases_tmp"
@@ -1097,8 +1322,7 @@ end
   fi
 
   pkg_tmp="$(mktemp -t dotnet-sdk).pkg"
-  log "Downloading .NET SDK ${sdk_version:-latest} (${rid})."
-  if ! curl -fL "$pkg_url" -o "$pkg_tmp"; then
+  if ! run_with_spinner "Downloading .NET SDK ${sdk_version:-latest} (${rid})..." curl -fL "$pkg_url" -o "$pkg_tmp"; then
     log "Failed to download .NET SDK package."
     summary_failed ".NET SDK install failed (download)"
     rm -f "$index_tmp" "$releases_tmp" "$pkg_tmp"
@@ -1106,7 +1330,7 @@ end
   fi
 
   log "Installing .NET SDK (requires sudo)."
-  if ! sudo installer -pkg "$pkg_tmp" -target /; then
+  if ! run_quiet sudo installer -pkg "$pkg_tmp" -target /; then
     summary_failed ".NET SDK install failed (installer)"
     rm -f "$index_tmp" "$releases_tmp" "$pkg_tmp"
     return 1
@@ -1130,9 +1354,9 @@ step_user_shell() {
 
   if brew_bin="$(find_brew)"; then
     if [[ "$brew_bin" == "/opt/homebrew/bin/brew" ]]; then
-      brew_shellenv_line='eval "$(/opt/homebrew/bin/brew shellenv)"'
+      brew_shellenv_line="eval \"\$(/opt/homebrew/bin/brew shellenv)\""
     elif [[ "$brew_bin" == "/usr/local/bin/brew" ]]; then
-      brew_shellenv_line='eval "$(/usr/local/bin/brew shellenv)"'
+      brew_shellenv_line="eval \"\$(/usr/local/bin/brew shellenv)\""
     fi
   fi
 
@@ -1142,20 +1366,20 @@ step_user_shell() {
     fi
   fi
 
-  if ensure_line "$zprofile" 'export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"'; then
+  if ensure_line "$zprofile" "export SSH_AUTH_SOCK=\"\$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock\""; then
     shell_changed="true"
   fi
-  if ensure_line "$zprofile" 'export PNPM_HOME="$HOME/Library/pnpm"'; then
+  if ensure_line "$zprofile" "export PNPM_HOME=\"\$HOME/Library/pnpm\""; then
     shell_changed="true"
   fi
-  if ensure_line "$zprofile" 'export PATH="$PNPM_HOME:$PATH"'; then
+  if ensure_line "$zprofile" "export PATH=\"\$PNPM_HOME:\$PATH\""; then
     shell_changed="true"
   fi
-  if ensure_line "$zprofile" 'export PATH="$HOME/.cargo/bin:$PATH"'; then
+  if ensure_line "$zprofile" "export PATH=\"\$HOME/.cargo/bin:\$PATH\""; then
     shell_changed="true"
   fi
 
-  if ensure_line "$zshrc" 'eval "$(mise activate zsh)"'; then
+  if ensure_line "$zshrc" "eval \"\$(mise activate zsh)\""; then
     shell_changed="true"
   fi
   if ensure_line "$zshrc" 'autoload -Uz compinit'; then
@@ -1167,16 +1391,16 @@ step_user_shell() {
   if ensure_line "$zshrc" 'zstyle ":completion:*" matcher-list "m:{a-zA-Z}={A-Za-z}"'; then
     shell_changed="true"
   fi
-  if ensure_line "$zshrc" 'eval "$(direnv hook zsh)"'; then
+  if ensure_line "$zshrc" "eval \"\$(direnv hook zsh)\""; then
     shell_changed="true"
   fi
-  if ensure_line "$zshrc" 'eval "$(starship init zsh)"'; then
+  if ensure_line "$zshrc" "eval \"\$(starship init zsh)\""; then
     shell_changed="true"
   fi
   if ensure_line "$zshrc" "alias cy='codex --yolo --search'"; then
     shell_changed="true"
   fi
-  if ensure_line "$zshrc" 'yt(){ yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox "$@"; }'; then
+  if ensure_line "$zshrc" "yt(){ yt-dlp -f \"bv*+ba/b\" --write-subs --sub-langs \"en\" --sub-format \"srt/best\" --convert-subs srt --cookies-from-browser firefox \"\$@\"; }"; then
     shell_changed="true"
   fi
 
@@ -1219,9 +1443,8 @@ step_one_password() {
     return 0
   fi
 
-  log "Open 1Password and sign in."
-  open -a "1Password" >/dev/null 2>&1 || true
-  prompt_user "Enable CLI integration (Settings -> Developer), then press Enter..."
+  wait_for_enter "Open 1Password, sign in, and enable CLI integration (Settings -> Developer), then press Enter..." \
+    open -a "1Password"
 
   if ! "$op_bin" account list >/dev/null 2>&1; then
     log "Add your 1Password account."
@@ -1229,8 +1452,24 @@ step_one_password() {
   fi
 
   if ! "$op_bin" whoami >/dev/null 2>&1; then
-    log "Sign in to 1Password."
-    eval "$("$op_bin" signin)"
+    if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
+      start_spinner "Sign in to 1Password (CLI)..."
+    else
+      log "Sign in to 1Password (CLI)..."
+    fi
+
+    if ! signin_output="$("$op_bin" signin)"; then
+      if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
+        stop_spinner fail
+      fi
+      summary_failed "1Password CLI sign-in failed"
+      return 1
+    fi
+    eval "$signin_output"
+
+    if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
+      stop_spinner success
+    fi
   fi
 
   if [[ ! -S "$op_ssh_sock" ]]; then
@@ -1308,10 +1547,36 @@ step_mise_setup() {
   fi
 
   eval "$($mise_bin activate bash)"
-  "$mise_bin" use -g node@lts
-  "$mise_bin" exec node@lts -- corepack enable
-  "$mise_bin" exec node@lts -- corepack prepare pnpm@latest --activate
-  "$mise_bin" exec node@lts -- pnpm add -g @openai/codex
+
+  if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
+    start_spinner "Configuring Node/pnpm/Codex..."
+    if ! run_quiet "$mise_bin" use -g node@lts; then
+      stop_spinner fail
+      summary_failed "mise setup failed (node)"
+      return 1
+    fi
+    if ! run_quiet "$mise_bin" exec node@lts -- corepack enable; then
+      stop_spinner fail
+      summary_failed "mise setup failed (corepack)"
+      return 1
+    fi
+    if ! run_quiet "$mise_bin" exec node@lts -- corepack prepare pnpm@latest --activate; then
+      stop_spinner fail
+      summary_failed "mise setup failed (pnpm)"
+      return 1
+    fi
+    if ! run_quiet "$mise_bin" exec node@lts -- pnpm add -g @openai/codex; then
+      stop_spinner fail
+      summary_failed "mise setup failed (codex)"
+      return 1
+    fi
+    stop_spinner success
+  else
+    run_quiet "$mise_bin" use -g node@lts
+    run_quiet "$mise_bin" exec node@lts -- corepack enable
+    run_quiet "$mise_bin" exec node@lts -- corepack prepare pnpm@latest --activate
+    run_quiet "$mise_bin" exec node@lts -- pnpm add -g @openai/codex
+  fi
   summary_changed "Configured Node (mise), pnpm, and codex"
 }
 
@@ -1322,12 +1587,23 @@ step_rustup_setup() {
     return 0
   fi
 
-  log "Installing rustup (Rust toolchain manager)."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
+    start_spinner "Installing rustup (Rust toolchain manager)..."
+    if ! { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y; } >>"$LOG_FILE" 2>&1; then
+      stop_spinner fail
+      summary_failed "rustup install failed"
+      return 1
+    fi
+    stop_spinner success
+  else
+    log "Installing rustup (Rust toolchain manager)."
+    { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y; } >>"$LOG_FILE" 2>&1
+  fi
   summary_installed "rustup"
 }
 
 step_defaults() {
+  log ""
   defaults write com.apple.dock show-recents -bool false
   defaults write com.apple.dock autohide -bool true
   defaults write com.apple.dock magnification -bool true
@@ -1336,8 +1612,6 @@ step_defaults() {
 
   defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
   defaults write com.apple.finder NewWindowTarget -string "PfHm"
-  defaults write com.apple.finder AppleShowAllFiles -bool true
-
   chflags nohidden "$HOME/Library"
 
   defaults write -g AppleShowAllExtensions -bool true
@@ -1365,7 +1639,7 @@ step_defaults() {
       duti -s "$ghostty_id" public.unix-executable all
       duti -s "$ghostty_id" public.script all
       duti -s "$ghostty_id" com.apple.terminal.shell-script all
-      log "Set Ghostty as default terminal handler."
+      status_ok "Set Ghostty as default terminal handler."
     else
       log "Ghostty not found in /Applications; skipping default terminal setup."
     fi
@@ -1379,7 +1653,7 @@ step_defaults() {
   killall Safari >/dev/null 2>&1 || true
 
   summary_changed "Applied macOS defaults"
-  log "macOS defaults applied. Some changes may require an app restart or logout/login."
+  status_ok "macOS defaults applied. Some changes may require an app restart or logout/login."
 }
 
 run_step() {
@@ -1388,23 +1662,52 @@ run_step() {
   local need_func="$3"
   local label
   local needs="false"
+  local blank_after="false"
 
   label="$(label_for_step "$step")"
+  if [[ "$step" == "one_password" ]]; then
+    log ""
+    blank_after="true"
+  fi
 
   if ! set_has "$SELECTED_SET" "$step"; then
     if set_has "$SKIP_SET" "$step"; then
       summary_skipped "$label (skipped by flag)"
+      if [[ "$blank_after" == "true" ]]; then
+        log ""
+      fi
     fi
     return 0
   fi
 
-  if [[ "$DRY_RUN" != "true" ]]; then
-    log "Checking $label..."
-  fi
-
   NEED_REASON=""
-  if "$need_func"; then
-    needs="true"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    start_spinner "Checking $label..."
+    if "$need_func"; then
+      needs="true"
+    fi
+    stop_spinner
+  else
+    if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
+      start_spinner "Checking $label..."
+      if "$need_func"; then
+        needs="true"
+      fi
+      if [[ "$needs" == "false" && "$FORCE_ONLY" == "false" ]]; then
+        SPINNER_MSG="$label already configured"
+        stop_spinner success
+        summary_skipped "$label already configured"
+        if [[ "$blank_after" == "true" ]]; then
+          log ""
+        fi
+        return 0
+      fi
+      stop_spinner success
+    else
+      if "$need_func"; then
+        needs="true"
+      fi
+    fi
   fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -1419,10 +1722,19 @@ run_step() {
   if [[ "$needs" == "true" || "$FORCE_ONLY" == "true" ]]; then
     if ! "$func"; then
       summary_failed "$label failed"
+      status_fail "$label failed"
+      if [[ "$blank_after" == "true" ]]; then
+        log ""
+      fi
       return 1
     fi
   else
     summary_skipped "$label already configured"
+    status_ok "$label already configured"
+  fi
+
+  if [[ "$blank_after" == "true" ]]; then
+    log ""
   fi
 }
 
@@ -1438,23 +1750,22 @@ run_or_exit() {
 }
 
 manual_steps() {
+  section "Manual steps"
   cat <<'EOF'
-
-Manual steps:
-- System Settings -> Apple ID -> iCloud -> iCloud Drive: disable "Optimize Mac Storage"
-- System Settings -> Passwords -> AutoFill Passwords and Passkeys: disable (use 1Password)
-- System Settings -> Notifications: disable notification sounds per-app (no global toggle)
-- System Settings -> Appearance -> Sidebar icon size: Small
-- System Settings -> Control Center: adjust menu bar items (e.g., Focus) to your preference
-- Finder -> Settings -> Sidebar: customize favorites to your liking
-- Finder -> View: Show Path Bar
-- Finder -> Settings -> Advanced: enable "Keep folders on top" (when sorting by name)
-- Finder: toggle hidden files with Cmd+Shift+. (useful if you ever need it)
-- Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
-- IINA -> Settings -> General: enable "Use legacy fullscreen"
-- Work repo: to use a different Codex login in a subdirectory:
-  `echo 'export CODEX_HOME="$HOME/.codex-<project>"' >> .envrc` then `direnv allow`
-- Xcode: download from https://developer.apple.com/download/all/ then install with `unxip Xcode_*.xip /Applications`
+  - System Settings -> Apple ID -> iCloud -> iCloud Drive: disable "Optimize Mac Storage"
+  - System Settings -> Passwords -> AutoFill Passwords and Passkeys: disable (use 1Password)
+  - System Settings -> Notifications: disable notification sounds per-app (no global toggle)
+  - System Settings -> Appearance -> Sidebar icon size: Small
+  - System Settings -> Control Center: adjust menu bar items (e.g., Focus) to your preference
+  - Finder -> Settings -> Sidebar: customize favorites to your liking
+  - Finder -> View: Show Path Bar
+  - Finder -> Settings -> Advanced: enable "Keep folders on top" (when sorting by name)
+  - Finder: toggle hidden files with Cmd+Shift+. (useful if you ever need it)
+  - Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
+  - IINA -> Settings -> General: enable "Use legacy fullscreen"
+  - Work repo: to use a different Codex login in a subdirectory:
+    `echo 'export CODEX_HOME="$HOME/.codex-<project>"' >> .envrc` then `direnv allow`
+  - Xcode: download from https://developer.apple.com/download/all/ then install with `unxip Xcode_*.xip /Applications`
 EOF
 }
 
@@ -1462,34 +1773,33 @@ print_brewfile_summary() {
   local items
 
   if ! resolve_brewfile; then
-    log "Brewfile not available; skipping installed apps list."
+    log_warn "Brewfile not available; skipping installed apps list."
     return
   fi
 
-  printf '%s\n' "" "Brewfile entries:"
+  section "Brewfile entries"
 
   items="$(awk -F '\"' '/^brew "/ {print $2}' "$BREWFILE" | paste -sd ', ' -)"
   if [[ -n "$items" ]]; then
-    printf 'CLI tools: %s\n' "$items"
+    printf '  - CLI tools: %s\n' "$items"
   fi
 
   items="$(awk -F '\"' '/^cask "/ {print $2}' "$BREWFILE" | paste -sd ', ' -)"
   if [[ -n "$items" ]]; then
-    printf 'Apps (casks): %s\n' "$items"
+    printf '  - Apps (casks): %s\n' "$items"
   fi
 
   items="$(awk -F '\"' '/^mas "/ {print $2}' "$BREWFILE" | paste -sd ', ' -)"
   if [[ -n "$items" ]]; then
-    printf 'App Store (mas): %s\n' "$items"
+    printf '  - App Store (mas): %s\n' "$items"
   fi
 }
 
 print_shell_shortcuts() {
+  section "Shell shortcuts"
   cat <<'EOF'
-
-Shell shortcuts:
-- cy = codex --yolo --search
-- yt = yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox <url>
+  - cy = codex --yolo --search
+  - yt = yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox <url>
 EOF
 }
 
