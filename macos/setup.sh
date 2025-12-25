@@ -1386,6 +1386,10 @@ run_step() {
     return 0
   fi
 
+  if [[ "$DRY_RUN" != "true" ]]; then
+    log "Checking $label..."
+  fi
+
   NEED_REASON=""
   if "$need_func"; then
     needs="true"
@@ -1434,7 +1438,8 @@ Manual steps:
 - Finder -> View: Show Path Bar
 - Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
 - IINA -> Settings -> General: enable "Use legacy fullscreen"
-- Work repo: add a `.envrc` with `export CODEX_HOME="$HOME/.codex-<project>"`, then run `direnv allow`
+- Work repo: to use a different Codex login in a subdirectory:
+  `echo 'export CODEX_HOME="$HOME/.codex-<project>"' >> .envrc` then `direnv allow`
 - Xcode: download from https://developer.apple.com/download/all/ then install with `unxip Xcode_*.xip /Applications`
 EOF
 }
@@ -1469,8 +1474,8 @@ print_shell_shortcuts() {
   cat <<'EOF'
 
 Shell shortcuts:
-- cy = codex --yolo
-- yt = yt-dlp -f "bv*+ba/b" --write-subs --write-auto-subs --sub-langs "en.*,de.*" --sub-format "srt/best" --convert-subs srt <url>
+- cy = codex --yolo --search
+- yt = yt-dlp -f "bv*+ba/b" --write-subs --sub-langs "en" --sub-format "srt/best" --convert-subs srt --cookies-from-browser firefox <url>
 EOF
 }
 

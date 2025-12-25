@@ -28,6 +28,7 @@ cask "alfred"
 cask "chatgpt"
 cask "visual-studio-code"
 cask "microsoft-teams"
+cask "zed"
 
 mas "Microsoft Word", id: 462054704
 mas "Microsoft Excel", id: 462058435
