@@ -92,6 +92,9 @@ init_log() {
   touch "$LOG_FILE"
   exec > >(tee -a "$LOG_FILE") 2>&1
   log "Log file: $LOG_FILE"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log "Dry run: evaluating checks..."
+  fi
 }
 
 trim() {
@@ -893,6 +896,13 @@ need_defaults() {
   value="$(normalize_bool "$(defaults_read com.apple.finder AppleShowAllFiles)")"
   [[ "$value" == "1" ]] || mismatches+=("show-all-files")
 
+  if [[ -d "$HOME/Library" ]]; then
+    value="$(stat -f %Sf "$HOME/Library" 2>/dev/null || true)"
+    if [[ "$value" == *hidden* ]]; then
+      mismatches+=("show-library-folder")
+    fi
+  fi
+
   value="$(normalize_bool "$(defaults_read -g ApplePressAndHoldEnabled)")"
   [[ "$value" == "0" ]] || mismatches+=("press-and-hold")
 
@@ -1328,6 +1338,8 @@ step_defaults() {
   defaults write com.apple.finder NewWindowTarget -string "PfHm"
   defaults write com.apple.finder AppleShowAllFiles -bool true
 
+  chflags nohidden "$HOME/Library"
+
   defaults write -g AppleShowAllExtensions -bool true
   defaults write -g ApplePressAndHoldEnabled -bool false
   defaults write -g KeyRepeat -int 2
@@ -1437,6 +1449,7 @@ Manual steps:
 - Finder -> Settings -> Sidebar: customize favorites to your liking
 - Finder -> View: Show Path Bar
 - Finder -> Settings -> Advanced: enable "Keep folders on top" (when sorting by name)
+- Finder: toggle hidden files with Cmd+Shift+. (useful if you ever need it)
 - Calendar: add Fastmail account (CalDAV) following https://www.fastmail.help/hc/en-us/articles/1500000277682-Automatic-setup-on-Mac
 - IINA -> Settings -> General: enable "Use legacy fullscreen"
 - Work repo: to use a different Codex login in a subdirectory:
