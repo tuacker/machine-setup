@@ -1779,17 +1779,20 @@ print_brewfile_summary() {
 
   section "Brewfile entries"
 
-  items="$(awk -F '\"' '/^brew "/ {print $2}' "$BREWFILE" | paste -sd ', ' -)"
+  items="$(awk -F '\"' '/^brew "/ {print $2}' "$BREWFILE" | paste -sd ',' -)"
+  items="${items//,/, }"
   if [[ -n "$items" ]]; then
     printf '  - CLI tools: %s\n' "$items"
   fi
 
-  items="$(awk -F '\"' '/^cask "/ {print $2}' "$BREWFILE" | paste -sd ', ' -)"
+  items="$(awk -F '\"' '/^cask "/ {print $2}' "$BREWFILE" | paste -sd ',' -)"
+  items="${items//,/, }"
   if [[ -n "$items" ]]; then
     printf '  - Apps (casks): %s\n' "$items"
   fi
 
-  items="$(awk -F '\"' '/^mas "/ {print $2}' "$BREWFILE" | paste -sd ', ' -)"
+  items="$(awk -F '\"' '/^mas "/ {print $2}' "$BREWFILE" | paste -sd ',' -)"
+  items="${items//,/, }"
   if [[ -n "$items" ]]; then
     printf '  - App Store (mas): %s\n' "$items"
   fi
