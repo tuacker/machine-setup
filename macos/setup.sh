@@ -53,7 +53,7 @@ Legacy shorthands:
 Sections (use with --only/--skip):
   Groups:
     global     = machine, xcode, brew, apps, dotnet
-    user       = user-shell, 1password, git, mise, rustup
+    user       = user-shell, 1password, git, node, rustup
     defaults   = macOS defaults (Dock/Finder/Safari/etc.)
 
   Steps:
@@ -65,7 +65,7 @@ Sections (use with --only/--skip):
     user-shell = ~/.zprofile, ~/.zshrc, starship config
     1password  = sign in 1Password CLI + SSH agent
     git        = git name/email/default branch + global ignore
-    mise       = node/pnpm/codex via mise
+    node       = node/pnpm/codex via brew/npm
     rustup     = Rust toolchain manager
 USAGE
 }
@@ -462,7 +462,7 @@ expand_token() {
       echo "machine_name xcode_clt brew_install brew_bundle dotnet_pkg"
       ;;
     user)
-      echo "user_shell one_password git_config mise_setup rustup_setup"
+      echo "user_shell one_password git_config node_setup rustup_setup"
       ;;
     defaults)
       echo "defaults"
@@ -482,8 +482,8 @@ expand_token() {
     git)
       echo "git_config"
       ;;
-    mise)
-      echo "mise_setup"
+    node)
+      echo "node_setup"
       ;;
     rust|rustup)
       echo "rustup_setup"
@@ -512,7 +512,7 @@ ALL_STEPS=(
   user_shell
   one_password
   git_config
-  mise_setup
+  node_setup
   rustup_setup
   defaults
 )
@@ -565,7 +565,7 @@ build_sets() {
   if set_has "$SELECTED_SET" "brew_install"; then
     selected_add "xcode_clt"
   fi
-  if set_has "$SELECTED_SET" "mise_setup"; then
+  if set_has "$SELECTED_SET" "node_setup"; then
     selected_add "brew_bundle"
     selected_add "brew_install"
     selected_add "xcode_clt"
@@ -606,8 +606,8 @@ label_for_step() {
     git_config)
       echo "Git config"
       ;;
-    mise_setup)
-      echo "Mise + Node/pnpm/Codex"
+    node_setup)
+      echo "Node + pnpm + codex"
       ;;
     rustup_setup)
       echo "Rustup"
@@ -760,6 +760,7 @@ ensure_line() {
 
   return 1
 }
+
 
 write_file_if_changed() {
   local file="$1"
@@ -925,7 +926,6 @@ need_user_shell() {
   done
 
   zshrc_lines=(
-    "eval \"\$(mise activate zsh)\""
     'autoload -Uz compinit'
     'compinit'
     'zstyle ":completion:*" matcher-list "m:{a-zA-Z}={A-Za-z}"'
@@ -941,6 +941,7 @@ need_user_shell() {
       break
     fi
   done
+
 
   if starship_config_differs "$HOME/.config/starship.toml"; then
     missing+=("starship config")
@@ -1030,14 +1031,14 @@ need_git_config() {
   return 1
 }
 
-need_mise_setup() {
-  if ! command -v mise >/dev/null 2>&1; then
-    NEED_REASON="mise not installed"
+need_node_setup() {
+  if ! command -v node >/dev/null 2>&1; then
+    NEED_REASON="node not installed"
     return 0
   fi
 
-  if ! command -v node >/dev/null 2>&1; then
-    NEED_REASON="node not installed"
+  if ! command -v npm >/dev/null 2>&1; then
+    NEED_REASON="npm not installed"
     return 0
   fi
 
@@ -1379,9 +1380,7 @@ step_user_shell() {
     shell_changed="true"
   fi
 
-  if ensure_line "$zshrc" "eval \"\$(mise activate zsh)\""; then
-    shell_changed="true"
-  fi
+
   if ensure_line "$zshrc" 'autoload -Uz compinit'; then
     shell_changed="true"
   fi
@@ -1529,55 +1528,60 @@ step_git_config() {
   fi
 }
 
-step_mise_setup() {
-  local mise_bin=""
-
-  if command -v mise >/dev/null 2>&1; then
-    mise_bin="$(command -v mise)"
-  elif [[ -x /opt/homebrew/bin/mise ]]; then
-    mise_bin="/opt/homebrew/bin/mise"
-  elif [[ -x /usr/local/bin/mise ]]; then
-    mise_bin="/usr/local/bin/mise"
-  fi
-
-  if [[ -z "$mise_bin" ]]; then
-    log "mise not found. Run brew bundle first."
-    summary_skipped "mise not installed"
+step_node_setup() {
+  if ! command -v node >/dev/null 2>&1; then
+    log "Node not found. Run brew bundle first."
+    summary_skipped "node not installed"
     return 0
   fi
 
-  eval "$($mise_bin activate bash)"
+  if ! command -v npm >/dev/null 2>&1; then
+    log "npm not found. Reinstall node via Homebrew."
+    summary_failed "npm missing"
+    return 1
+  fi
 
   if [[ -n "$TTY_OUT" && "$SPINNER_ENABLED" == "true" ]]; then
     start_spinner "Configuring Node/pnpm/Codex..."
-    if ! run_quiet "$mise_bin" use -g node@lts; then
+    if ! command -v corepack >/dev/null 2>&1; then
+      if ! run_quiet npm install -g corepack; then
+        stop_spinner fail
+        summary_failed "node setup failed (corepack install)"
+        return 1
+      fi
+    fi
+    if ! run_quiet corepack enable; then
       stop_spinner fail
-      summary_failed "mise setup failed (node)"
+      summary_failed "node setup failed (corepack enable)"
       return 1
     fi
-    if ! run_quiet "$mise_bin" exec node@lts -- corepack enable; then
+    if ! run_quiet corepack prepare pnpm@latest --activate; then
       stop_spinner fail
-      summary_failed "mise setup failed (corepack)"
+      summary_failed "node setup failed (pnpm)"
       return 1
     fi
-    if ! run_quiet "$mise_bin" exec node@lts -- corepack prepare pnpm@latest --activate; then
+    if ! run_quiet npm install -g @openai/codex; then
       stop_spinner fail
-      summary_failed "mise setup failed (pnpm)"
+      summary_failed "node setup failed (codex)"
       return 1
     fi
-    if ! run_quiet "$mise_bin" exec node@lts -- pnpm add -g @openai/codex; then
-      stop_spinner fail
-      summary_failed "mise setup failed (codex)"
-      return 1
+    if command -v pnpm >/dev/null 2>&1; then
+      run_quiet pnpm remove -g @openai/codex >/dev/null 2>&1 || true
     fi
     stop_spinner success
   else
-    run_quiet "$mise_bin" use -g node@lts
-    run_quiet "$mise_bin" exec node@lts -- corepack enable
-    run_quiet "$mise_bin" exec node@lts -- corepack prepare pnpm@latest --activate
-    run_quiet "$mise_bin" exec node@lts -- pnpm add -g @openai/codex
+    if ! command -v corepack >/dev/null 2>&1; then
+      run_quiet npm install -g corepack
+    fi
+    run_quiet corepack enable
+    run_quiet corepack prepare pnpm@latest --activate
+    run_quiet npm install -g @openai/codex
+    if command -v pnpm >/dev/null 2>&1; then
+      run_quiet pnpm remove -g @openai/codex >/dev/null 2>&1 || true
+    fi
   fi
-  summary_changed "Configured Node (mise), pnpm, and codex"
+
+  summary_changed "Configured Node (brew), pnpm, and codex (npm)"
 }
 
 step_rustup_setup() {
@@ -1817,7 +1821,7 @@ run_or_exit dotnet_pkg step_dotnet_pkg need_dotnet_pkg
 run_or_exit user_shell step_user_shell need_user_shell
 run_or_exit one_password step_one_password need_one_password
 run_or_exit git_config step_git_config need_git_config
-run_or_exit mise_setup step_mise_setup need_mise_setup
+run_or_exit node_setup step_node_setup need_node_setup
 run_or_exit rustup_setup step_rustup_setup need_rustup_setup
 run_or_exit defaults step_defaults need_defaults
 
