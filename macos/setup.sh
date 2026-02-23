@@ -1091,6 +1091,29 @@ defaults_read() {
   defaults read "$domain" "$key" 2>/dev/null || true
 }
 
+is_next_window_shortcut_cmd_backtick() {
+  local exported
+
+  exported="$(defaults export com.apple.symbolichotkeys - 2>/dev/null || true)"
+  if [[ -z "$exported" ]]; then
+    return 1
+  fi
+
+  if ! printf '%s' "$exported" | plutil -convert json -o - - 2>/dev/null | /usr/bin/ruby -rjson -e '
+data = JSON.parse(STDIN.read)
+hotkey = data.dig("AppleSymbolicHotKeys", "27")
+exit 1 unless hotkey
+enabled = hotkey["enabled"]
+params = hotkey.dig("value", "parameters")
+ok = (enabled == 1 || enabled == true) && params.is_a?(Array) && params[0] == 60 && params[1] == 50 && params[2] == 1048576
+exit(ok ? 0 : 1)
+'; then
+    return 1
+  fi
+
+  return 0
+}
+
 need_defaults() {
   local mismatches=()
   local value
@@ -1137,6 +1160,10 @@ need_defaults() {
 
   value="$(normalize_bool "$(defaults_read com.apple.WindowManager EnableStandardClickToShowDesktop)")"
   [[ "$value" == "0" ]] || mismatches+=("show-desktop-on-wallpaper")
+
+  if ! is_next_window_shortcut_cmd_backtick; then
+    mismatches+=("keyboard.next-window-shortcut")
+  fi
 
   value="$(normalize_bool "$(defaults_read com.apple.Safari AutoFillPasswords)")"
   if [[ -z "$value" ]]; then
@@ -1624,6 +1651,7 @@ step_defaults() {
   defaults write -g InitialKeyRepeat -int 15
 
   defaults write com.apple.WindowManager EnableStandardClickToShowDesktop -bool false
+  defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 27 '{enabled = 1; value = { parameters = (60, 50, 1048576); type = standard; }; }'
 
   if ! defaults write com.apple.Safari AutoFillPasswords -bool false; then
     log "Unable to write Safari preferences."
